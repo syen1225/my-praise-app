@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>우리반 칭찬 카운터 V6</title>
+    <style>
+        :root {
+            --primary-color: #4CAF50;
+            --secondary-color: #f44336;
+            --select-color: #2196F3;
+            --all-color: #FF9800;
+            --minus-color: #e91e63; /* 감점 모드 전용 색상 */
+            --bg-color: #f9f9f9;
+        }
+        body {
+            font-family: 'Pretendard', -apple-system, system-ui, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0; padding: 5px;
+            user-select: none; -webkit-tap-highlight-color: transparent;
+        }
+        header {
+            text-align: center; margin-bottom: 5px;
+            background: white; padding: 8px;
+            border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        #current-date { font-weight: bold; font-size: 0.9rem; }
+        
+        /* 상단 모드 안내 바 */
+        .mode-indicator {
+            text-align: center; padding: 5px; margin-bottom: 5px;
+            border-radius: 6px; font-weight: bold; font-size: 0.75rem;
+            display: none;
+        }
+        .mode-multi { background: #e3f2fd; color: #1976d2; }
+        .mode-minus { background: #fce4ec; color: #c2185b; }
+
+        .grid-container {
+            display: grid; 
+            grid-template-columns: repeat(5, 1fr); 
+            gap: 3px;
+            margin-bottom: 180px;
+        }
+        .student-card {
+            background: white; border-radius: 6px; padding: 6px 1px;
+            text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            transition: all 0.1s; border: 1.5px solid transparent;
+            display: flex; flex-direction: column; justify-content: center;
+            aspect-ratio: 1 / 1.15;
+        }
+        .student-card.selected { border-color: var(--select-color); background-color: #e3f2fd; }
+        
+        /* 감점 모드 시 카드 스타일 변화 */
+        body.minus-mode .student-card { border-color: #ffcdd2; }
+        body.minus-mode .count { color: var(--minus-color); }
+
+        .name { 
+            font-size: 0.95rem; font-weight: 800; color: #222;
+            display: block; margin-bottom: 1px; letter-spacing: -0.05rem;
+            white-space: nowrap; overflow: hidden;
+        }
+        .count { font-size: 1.1rem; font-weight: 900; color: var(--primary-color); }
+
+        /* 하단 메뉴 */
+        .bottom-menu {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: white; padding: 10px;
+            box-shadow: 0 -4px 15px rgba(0,0,0,0.1);
+            border-radius: 15px 15px 0 0; z-index: 100;
+        }
+        .main-controls { display: grid; grid-template-columns: 1.2fr 1fr; gap: 5px; margin-bottom: 5px; }
+        .sub-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+        
+        .multi-controls { 
+            display: none; justify-content: space-around; gap: 5px; 
+            margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;
+        }
+        
+        .btn {
+            border: none; padding: 12px 2px; border-radius: 8px;
+            font-weight: bold; font-size: 0.8rem; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .all-plus-btn { background: var(--all-color); color: white; font-size: 0.85rem; }
+        .undo-btn { background: #f0f0f0; color: #555; }
+        
+        /* 모드별 버튼 색상 */
+        .minus-btn { background: #fce4ec; color: var(--minus-color); }
+        body.minus-mode .minus-btn { background: var(--minus-color); color: white; }
+        
+        .mode-btn { background: #e3f2fd; color: var(--select-color); }
+        body.multi-mode .mode-btn { background: var(--select-color); color: white; }
+
+        .reset-btn { background: #f5f5f5; color: #999; }
+        .apply-btn { background: var(--select-color); color: white; width: 100%; }
+        .sel-action-btn { background: #f5f5f5; color: #333; flex: 1; }
+    </style>
+</head>
+<body class="">
+
+<header>
+    <div id="current-date"></div>
+</header>
+
+<div id="multi-text" class="mode-indicator mode-multi">다중 선택 모드 (제외할 학생 터치)</div>
+<div id="minus-text" class="mode-indicator mode-minus">감점 모드 (-1): 이름을 누르면 점수가 깎입니다.</div>
+
+<div class="grid-container" id="student-grid"></div>
+
+<div class="bottom-menu">
+    <div class="main-controls">
+        <button class="btn all-plus-btn" onclick="praiseAll()">✨ 전체 +1</button>
+        <button class="btn undo-btn" onclick="confirmUndo()">↩ 취소(확인)</button>
+    </div>
+    <div class="sub-controls">
+        <button class="btn minus-btn" onclick="toggleMinusMode()">➖ 감점모드</button>
+        <button class="btn mode-btn" onclick="toggleMultiMode()">📑 다중선택</button>
+        <button class="btn reset-btn" onclick="confirmReset()">🔄 초기화</button>
+    </div>
+    <div class="multi-controls" id="multi-box">
+        <button class="btn sel-action-btn" onclick="selectAll(true)">전체선택</button>
+        <button class="btn sel-action-btn" onclick="selectAll(false)">해제</button>
+        <button class="btn apply-btn" onclick="applyMultiPraise()">선택 학생만 +1</button>
+    </div>
+</div>
+
+<script>
+    let names = ["김태율", "서동하", "김하루", "정윤아", "신준우", "김진솔", "정효윤", "이세아", "손희진", "곽지윤", "심아윤", "이소윤", "최현우", "이상연", "홍혜정", "장채아", "임재호", "박도율", "최정음", "이수민", "유지아", "박이건", "정민석", "서예은", "우수연"];
+    names.sort((a, b) => a.localeCompare(b, 'ko'));
+
+    let counts = {};
+    let history = [];
+    let selectedStudents = new Set();
+    let isMultiMode = false;
+    let isMinusMode = false;
+
+    function init() {
+        const now = new Date();
+        const week = ['일', '월', '화', '수', '목', '금', '토'];
+        document.getElementById('current-date').innerText = `${now.getFullYear()}년 ${now.getMonth()+1}월 ${now.getDate()}일 (${week[now.getDay()]})`;
+
+        const savedData = localStorage.getItem('praiseCounts');
+        if (savedData) {
+            counts = JSON.parse(savedData);
+            names.forEach(name => { if(counts[name] === undefined) counts[name] = 0; });
+        } else {
+            names.forEach(name => counts[name] = 0);
+        }
+        render();
+    }
+
+    function render() {
+        const grid = document.getElementById('student-grid');
+        grid.innerHTML = '';
+        names.forEach(name => {
+            const card = document.createElement('div');
+            card.className = `student-card ${selectedStudents.has(name) ? 'selected' : ''}`;
+            card.onclick = () => handleCardClick(name);
+            card.innerHTML = `<span class="name">${name}</span><span class="count">${counts[name]}</span>`;
+            grid.appendChild(card);
+        });
+        localStorage.setItem('praiseCounts', JSON.stringify(counts));
+    }
+
+    function handleCardClick(name) {
+        if (isMultiMode) {
+            if (selectedStudents.has(name)) selectedStudents.delete(name);
+            else selectedStudents.add(name);
+            render();
+        } else if (isMinusMode) {
+            decrement(name);
+        } else {
+            increment(name);
+        }
+    }
+
+    function increment(name) {
+        saveHistory();
+        counts[name]++;
+        render();
+        if (navigator.vibrate) navigator.vibrate(30);
+    }
+
+    function decrement(name) {
+        if (counts[name] <= 0) return; // 0점 미만으로는 안 내려가게 설정
+        saveHistory();
+        counts[name]--;
+        render();
+        if (navigator.vibrate) navigator.vibrate([50, 30]); // 감점 시 진동 패턴 다르게
+    }
+
+    function toggleMinusMode() {
+        if (isMultiMode) toggleMultiMode(); // 다중선택 모드 해제
+        isMinusMode = !isMinusMode;
+        document.body.classList.toggle('minus-mode');
+        document.getElementById('minus-text').style.display = isMinusMode ? 'block' : 'none';
+        render();
+    }
+
+    function toggleMultiMode() {
+        if (isMinusMode) toggleMinusMode(); // 감점 모드 해제
+        isMultiMode = !isMultiMode;
+        document.body.classList.toggle('multi-mode');
+        document.getElementById('multi-box').style.display = isMultiMode ? 'flex' : 'none';
+        document.getElementById('multi-text').style.display = isMultiMode ? 'block' : 'none';
+        if (isMultiMode) names.forEach(n => selectedStudents.add(n));
+        else selectedStudents.clear();
+        render();
+    }
+
+    function praiseAll() {
+        if (confirm("전체 학생에게 칭찬 점수 1점을 줄까요?")) {
+            saveHistory();
+            names.forEach(n => counts[n]++);
+            render();
+            if (navigator.vibrate) navigator.vibrate(100);
+        }
+    }
+
+    function selectAll(bool) {
+        if (bool) names.forEach(n => selectedStudents.add(n));
+        else selectedStudents.clear();
+        render();
+    }
+
+    function applyMultiPraise() {
+        if (selectedStudents.size === 0) return alert("선택된 학생이 없습니다.");
+        saveHistory();
+        selectedStudents.forEach(name => counts[name]++);
+        selectedStudents.clear();
+        toggleMultiMode();
+    }
+
+    function saveHistory() {
+        history.push(JSON.parse(JSON.stringify(counts)));
+        if (history.length > 20) history.shift();
+    }
+
+    function confirmUndo() {
+        if (history.length === 0) return alert("취소할 기록이 없습니다.");
+        if (confirm("방금 하신 동작을 취소하시겠습니까?")) {
+            counts = history.pop();
+            render();
+        }
+    }
+
+    function confirmReset() {
+        if (confirm("정말로 모든 기록을 초기화할까요?")) {
+            names.forEach(name => counts[name] = 0);
+            history = [];
+            render();
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
