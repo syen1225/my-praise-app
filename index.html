@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>우리반 칭찬 카운터 V8</title>
+    <title>초고속 실시간 칭찬 카운터 V9</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     <style>
         :root {
             --primary-color: #4CAF50; --secondary-color: #f44336;
@@ -20,8 +22,7 @@
             border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
         #current-date { font-weight: bold; font-size: 0.9rem; }
-        #sync-status { font-size: 0.7rem; color: #888; margin-top: 2px; transition: 0.3s; }
-        .syncing { color: var(--select-color) !important; font-weight: bold; }
+        #sync-status { font-size: 0.7rem; color: #4CAF50; margin-top: 2px; font-weight: bold; }
 
         .mode-indicator {
             text-align: center; padding: 5px; margin-bottom: 5px;
@@ -42,7 +43,6 @@
         .student-card.selected { border-color: var(--select-color); background-color: #e3f2fd; }
         body.minus-mode .student-card { border-color: #ffcdd2; }
         body.minus-mode .count { color: var(--minus-color); }
-        body.syncing-mode .student-card { opacity: 0.7; pointer-events: none; }
 
         .name { 
             font-size: 0.95rem; font-weight: 800; color: #222; display: block;
@@ -71,18 +71,18 @@
 
         .loading-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(255,255,255,0.8); display: flex; flex-direction: column;
-            justify-content: center; align-items: center; z-index: 2000; font-weight: bold; color: var(--select-color);
+            background: white; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 2000; font-weight: bold; color: var(--primary-color);
         }
     </style>
 </head>
 <body>
 
-<div id="loading" class="loading-overlay">데이터 동기화 중...</div>
+<div id="loading" class="loading-overlay">실시간 서버 연결 중...</div>
 
 <header>
     <div id="current-date"></div>
-    <div id="sync-status">연결 대기 중</div>
+    <div id="sync-status">● 실시간 연결됨</div>
 </header>
 
 <div id="multi-text" class="mode-indicator mode-multi">다중 선택 모드 (제외할 학생 터치)</div>
@@ -109,9 +109,23 @@
 
 <script>
     // ---------------------------------------------------------
-    // ⚠️ 수정 필요: 구글 앱스 스크립트 웹 앱 URL을 여기에 넣으세요!
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbyNjanG0y88_bIPE7g33lmUH1Rwjx0DwUa7FX0rAzAS2HIFbpDBrn_lDZCGf0BSapkt/exec"; 
+    // ⚠️ 수정 필요: 파이어베이스 콘솔에서 받은 설정값을 여기에 넣으세요!
+    const firebaseConfig = {
+  apiKey: "AIzaSyDpWelIKPD1LVr0oLMPuIy6zClQ-AXs52Y",
+  authDomain: "class-praise-app.firebaseapp.com",
+databaseURL: "https://class-praise-app-default-rtdb.asia-southeast1.firebasedatabase.app", 
+  projectId: "class-praise-app",
+  storageBucket: "class-praise-app.firebasestorage.app",
+  messagingSenderId: "271910623890",
+  appId: "1:271910623890:web:9c1ea6fefd2ee7905da44b"
+};
+
     // ---------------------------------------------------------
+
+    // Firebase 초기화
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+    const dbRef = database.ref('praiseCounts');
 
     let names = ["김태율", "서동하", "김하루", "정윤아", "신준우", "김진솔", "정효윤", "이세아", "손희진", "곽지윤", "심아윤", "이소윤", "최현우", "이상연", "홍혜정", "장채아", "임재호", "박도율", "최정음", "이수민", "유지아", "박이건", "정민석", "서예은", "우수연"];
     names.sort((a, b) => a.localeCompare(b, 'ko'));
@@ -121,50 +135,20 @@
     let selectedStudents = new Set();
     let isMultiMode = false;
     let isMinusMode = false;
-    let isSyncing = false; // 동기화 상태 플래그
 
-    async function syncWithServer(payload) {
-        if (isSyncing) return;
-        isSyncing = true;
-        document.body.classList.add('syncing-mode');
-        setStatus("동기화 중...", true);
-        
-        try {
-            await fetch(GAS_URL, { method: "POST", body: JSON.stringify(payload) });
-            setStatus("완료 (" + new Date().toLocaleTimeString() + ")", false);
-        } catch (e) {
-            setStatus("동기화 실패(오프라인)", false);
-        } finally {
-            isSyncing = false;
-            document.body.classList.remove('syncing-mode');
-        }
-    }
-
-    function setStatus(msg, isSync) {
-        const el = document.getElementById('sync-status');
-        el.innerText = msg;
-        el.className = isSync ? 'syncing' : '';
-    }
-
-    async function init() {
-        const now = new Date();
-        const week = ['일', '월', '화', '수', '목', '금', '토'];
-        document.getElementById('current-date').innerText = `${now.getFullYear()}년 ${now.getMonth()+1}월 ${now.getDate()}일 (${week[now.getDay()]})`;
-
-        try {
-            const response = await fetch(GAS_URL);
-            counts = await response.json();
-            localStorage.setItem('praiseCounts', JSON.stringify(counts));
-            setStatus("최신 데이터 로드 완료", false);
-        } catch (e) {
-            const savedData = localStorage.getItem('praiseCounts');
-            counts = savedData ? JSON.parse(savedData) : {};
-            names.forEach(n => { if(counts[n] === undefined) counts[n] = 0; });
-            setStatus("서버 연결 실패(로컬 모드)", false);
+    // [핵심] 실시간 리스너: 서버 데이터가 바뀌면 즉시 화면 갱신
+    dbRef.on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            counts = data;
+        } else {
+            // 서버에 데이터가 없으면 초기화
+            names.forEach(n => counts[n] = 0);
+            dbRef.set(counts);
         }
         document.getElementById('loading').style.display = 'none';
         render();
-    }
+    });
 
     function render() {
         const grid = document.getElementById('student-grid');
@@ -176,52 +160,60 @@
             card.innerHTML = `<span class="name">${name}</span><span class="count">${counts[name] || 0}</span>`;
             grid.appendChild(card);
         });
-        localStorage.setItem('praiseCounts', JSON.stringify(counts));
+        const now = new Date();
+        const week = ['일', '월', '화', '수', '목', '금', '토'];
+        document.getElementById('current-date').innerText = `${now.getFullYear()}년 ${now.getMonth()+1}월 ${now.getDate()}일 (${week[now.getDay()]})`;
     }
 
-    async function handleCardClick(name) {
-        if (isSyncing) return;
+    function handleCardClick(name) {
         if (isMultiMode) {
             if (selectedStudents.has(name)) selectedStudents.delete(name);
             else selectedStudents.add(name);
             render();
         } else if (isMinusMode) {
-            if (counts[name] <= 0) return;
-            saveHistory(); counts[name]--; render();
+            if ((counts[name] || 0) <= 0) return;
+            saveHistory();
+            dbRef.child(name).set((counts[name] || 0) - 1);
             if (navigator.vibrate) navigator.vibrate([50, 30]);
-            await syncWithServer({ name: name, action: "minus", type: "single" });
         } else {
-            saveHistory(); counts[name]++; render();
+            saveHistory();
+            dbRef.child(name).set((counts[name] || 0) + 1);
             if (navigator.vibrate) navigator.vibrate(30);
-            await syncWithServer({ name: name, action: "plus", type: "single" });
         }
     }
 
-    async function praiseAll() {
-        if (isSyncing || !confirm("전체 학생에게 1점을 줄까요?")) return;
-        saveHistory(); names.forEach(n => counts[n]++); render();
-        await syncWithServer({ counts: counts, type: "all" });
+    function praiseAll() {
+        if (!confirm("전체 학생에게 1점을 줄까요?")) return;
+        saveHistory();
+        const newCounts = { ...counts };
+        names.forEach(n => newCounts[n] = (newCounts[n] || 0) + 1);
+        dbRef.set(newCounts);
     }
 
-    async function applyMultiPraise() {
-        if (selectedStudents.size === 0 || isSyncing) return;
-        saveHistory(); selectedStudents.forEach(n => counts[n]++);
-        selectedStudents.clear(); toggleMultiMode();
-        await syncWithServer({ counts: counts, type: "all" });
+    function applyMultiPraise() {
+        if (selectedStudents.size === 0) return;
+        saveHistory();
+        const newCounts = { ...counts };
+        selectedStudents.forEach(n => newCounts[n] = (newCounts[n] || 0) + 1);
+        selectedStudents.clear();
+        toggleMultiMode();
+        dbRef.set(newCounts);
     }
 
-    async function confirmUndo() {
-        if (history.length === 0 || isSyncing) return alert("기록이 없습니다.");
+    function confirmUndo() {
+        if (history.length === 0) return alert("취소할 기록이 없습니다.");
         if (confirm("방금 동작을 취소할까요?")) {
-            counts = history.pop(); render();
-            await syncWithServer({ counts: counts, type: "all" });
+            const lastState = history.pop();
+            dbRef.set(lastState);
         }
     }
 
-    async function confirmReset() {
-        if (isSyncing || !confirm("모든 기록을 초기화할까요?")) return;
-        names.forEach(n => counts[n] = 0); history = []; render();
-        await syncWithServer({ counts: counts, type: "all" });
+    function confirmReset() {
+        if (!confirm("정말로 모든 기록을 초기화할까요?")) return;
+        const resetData = {};
+        names.forEach(n => resetData[n] = 0);
+        history = [];
+        dbRef.set(resetData);
     }
 
     function toggleMinusMode() { if (isMultiMode) toggleMultiMode(); isMinusMode = !isMinusMode; document.body.classList.toggle('minus-mode'); document.getElementById('minus-text').style.display = isMinusMode ? 'block' : 'none'; render(); }
@@ -229,7 +221,6 @@
     function selectAll(bool) { if (bool) names.forEach(n => selectedStudents.add(n)); else selectedStudents.clear(); render(); }
     function saveHistory() { history.push(JSON.parse(JSON.stringify(counts))); if (history.length > 20) history.shift(); }
 
-    init();
 </script>
 </body>
 </html>
